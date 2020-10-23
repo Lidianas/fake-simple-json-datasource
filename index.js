@@ -2,34 +2,66 @@ var express = require('express');
 var bodyParser = require('body-parser');
 var _ = require('lodash');
 var app = express();
+var mysql =  require('mysql');
 
 app.use(bodyParser.json());
 
-var timeserie = require('./series');
+//-----------------------------
+
+// Conexão com o banco de dados
+
+/*const bd =  mysql.createConnection ({
+host: 'localhost',
+user: 'user',
+password: 'senha',
+database: 'base de dados'
+// OBS: ALTERAR DADOS ANTES DE INICIAR O SERVIDOR
+});
+
+bd.connect((err) => {
+if(err){ throw err};
+console.log("Conexão com a base de dados estabelecida com sucesso.")
+});
+
+
+//Essa query efetivamente não está sendo usada ainda, os dados estão sendo lidos de um arquivo .json gerado pelo MySQL
+function query(/* Aqui pode entrar alguns parametros para serem usados na query */
+  /*let query = "SELECT id, aerogerador, vel_vento FROM teste;";
+  return bd.query(query);
+};
+
+var q = query();
+*/
+//-----------------------------
+
 var countryTimeseries = require('./country-series');
+/*
+* resTeste foi gerado por uma query executada diretamente no shell do MySQL,
+* porque não foi possível alterar a pasta destino, que é uma estabelecida pelo MySQL
+* inacessível para mim, mesmo usando 'sudo' (deve ser um problema local). 
+* A depender do banco de dados, a query pode ser realizada neste código mesmo, por isso o exemplo de conexão 
+* ao banco ali em cima. 
+* Sugiro tentar alterar a pasta destino até para poder visualizar a saída dos dados sem precisar rodar a aplicação
+*/
+var timeserie = require('/var/lib/mysql-files/resTeste');
 
 var now = Date.now();
-
 for (var i = timeserie.length -1; i >= 0; i--) {
   var series = timeserie[i];
   var decreaser = 0;
-  for (var y = series.datapoints.length -1; y >= 0; y--) {
-    series.datapoints[y][1] = Math.round((now - decreaser) /1000) * 1000;
-    decreaser += 50000;
-  }
 }
 
 var annotation = {
   name : "annotation name",
   enabled: true,
-  datasource: "generic datasource",
+  datasource: "Banco de dados",
   showLine: true,
 }
 
 var annotations = [
-  { annotation: annotation, "title": "Donlad trump is kinda funny", "time": 1450754160000, text: "teeext", tags: "taaags" },
-  { annotation: annotation, "title": "Wow he really won", "time": 1450754160000, text: "teeext", tags: "taaags" },
-  { annotation: annotation, "title": "When is the next ", "time": 1450754160000, text: "teeext", tags: "taaags" }
+  { annotation: annotation, "title": "", "time": 1450754160000, text: "teeext", tags: "taaags" },
+  { annotation: annotation, "title": "", "time": 1450754160000, text: "teeext", tags: "taaags" },
+  { annotation: annotation, "title": "", "time": 1450754160000, text: "teeext", tags: "taaags" }
 ];
 
 var tagKeys = [
@@ -51,6 +83,9 @@ for (var i = 0;i < annotations.length; i++) {
   decreaser += 1000000
 }
 
+/*
+* Este é o modo como o Grafana 'aceita' os dados. Somente escrito diretamente aqui.
+
 var table =
   {
     columns: [{text: 'Time', type: 'time'}, {text: 'Country', type: 'string'}, {text: 'Number', type: 'number'}],
@@ -60,6 +95,21 @@ var table =
       [ 1234567, 'US', 321 ],
     ]
   };
+*/
+
+var now = Date.now();
+var decreaser = 0;
+var arrayTable = []
+_.each(timeserie, function(ts){
+  arrayTable.push([ts.id, ts.aerogerador, ts.vel_vento, (now - decreaser)]);
+  decreaser += 1000000;
+});
+
+var table =
+{
+  columns: [{text: 'ID', type: 'number'}, {text: 'AERO', type: 'string'}, {text: 'Velocidade do Vento', type: 'number'}, {text: 'hora', type:'time'}],
+  rows: arrayTable
+};
   
 function setCORSHeaders(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -67,28 +117,18 @@ function setCORSHeaders(res) {
   res.setHeader("Access-Control-Allow-Headers", "accept, content-type");  
 }
 
-
-var now = Date.now();
-var decreaser = 0;
-for (var i = 0;i < table.rows.length; i++) {
-  var anon = table.rows[i];
-
-  anon[0] = (now - decreaser);
-  decreaser += 1000000
-}
-
-app.all('/', function(req, res) {
-  setCORSHeaders(res);
-  res.send('I have a quest for you!');
-  res.end();
+app.all('/', function(req, res){
+  res.send("Servidor ok")
+  res.end;
 });
 
 app.all('/search', function(req, res){
   setCORSHeaders(res);
   var result = [];
-  _.each(timeserie, function(ts) {
-    result.push(ts.target);
-  });
+  result.push("Todos");
+  for(var i = 0; i < 12; i++){
+    result.push(timeserie[i].aerogerador)
+  }
 
   res.json(result);
   res.end();
@@ -118,17 +158,19 @@ app.all('/query', function(req, res){
   _.each(req.body.targets, function(target) {
     if (target.type === 'table') {
       tsResult.push(table);
-    } else {
-      var k = _.filter(fakeData, function(t) {
-        return t.target === target.target;
-      });
-
-      _.each(k, function(kk) {
-        tsResult.push(kk)
-      });
-    }
+    } 
   });
- 
+
+  //quando se tenta enviar direto a 'table' sem colocar no 'tsResult' (um array), o Grafana dá erro de tipo de resposta inesperada
+  console.log("-----------------")
+  console.log("Valores da tabela")
+  console.log("-----------------")
+  console.log(table);
+  console.log("-----------------")
+  console.log("Valores enviados")
+  console.log("-----------------")
+  console.log(tsResult)
+  console.log("-----------------")
   res.json(tsResult);
   res.end();
 });
