@@ -2,58 +2,60 @@ var express = require('express');
 var bodyParser = require('body-parser');
 var _ = require('lodash');
 var app = express();
-var mysql =  require('mysql');
+const { Client } = require('pg');
 
 app.use(bodyParser.json());
 
 //-----------------------------
 
-// Conexão com o banco de dados
+// Conexão com o banco de dados PostgreSQL
 
-/*const bd =  mysql.createConnection ({
-host: 'localhost',
-user: 'user',
-password: 'senha',
-database: 'base de dados'
-// OBS: ALTERAR DADOS ANTES DE INICIAR O SERVIDOR
+const connectionString = 'postgres://postgres:senhateste@localhost:5432/cepel';
+
+const client = new Client({
+    connectionString: connectionString
 });
 
-bd.connect((err) => {
-if(err){ throw err};
-console.log("Conexão com a base de dados estabelecida com sucesso.")
-});
+client.connect();
 
-
-//Essa query efetivamente não está sendo usada ainda, os dados estão sendo lidos de um arquivo .json gerado pelo MySQL
-function query(/* Aqui pode entrar alguns parametros para serem usados na query */
-  /*let query = "SELECT id, aerogerador, vel_vento FROM teste;";
-  return bd.query(query);
-};
-
-var q = query();
-*/
 //-----------------------------
 
-var countryTimeseries = require('./country-series');
-/*
-* resTeste foi gerado por uma query executada diretamente no shell do MySQL,
-* porque não foi possível alterar a pasta destino, que é uma estabelecida pelo MySQL
-* inacessível para mim, mesmo usando 'sudo' (deve ser um problema local). 
-* A depender do banco de dados, a query pode ser realizada neste código mesmo, por isso o exemplo de conexão 
-* ao banco ali em cima. 
-* Sugiro tentar alterar a pasta destino até para poder visualizar a saída dos dados sem precisar rodar a aplicação
-*/
-var timeserie = require('/var/lib/mysql-files/resTeste');
+// Gerador de dados
 
-var now = Date.now();
-for (var i = timeserie.length -1; i >= 0; i--) {
-  var series = timeserie[i];
-  var decreaser = 0;
-}
+function geradorDados(){
+  const aeros = ["AERO1", "AERO2", "AERO3", "AERO4"];
+  var vel_vento = 0;
+  var potencia_real = 0;
+  var potencia_calculada = 0;
+  var alarme = 0;
+
+  for (var i = 0; i < 4; i++){
+    vel_vento = Math.random() * (15 - 0);
+    potencia_real = Math.random() * (1300 - 500) + 500;
+    potencia_calculada = Math.random() * (potencia_real - 500) + 500;
+    if (potencia_calculada < potencia_real*0.7){
+      alarme = 1;
+    }else{
+      alarme = 0;
+    }
+
+    client.query('INSERT INTO teste (aerogerador, vel_vento, potencia_real, potencia_calculada, alarme) values ($1, $2, $3, $4, $5)',[aeros[i], vel_vento, potencia_real, potencia_calculada, alarme], function (err, result) {
+      if (err) {
+        console.log(err);
+      }
+    });
+  }
+};
+
+geradorDados();
+setInterval( geradorDados, 1*60*1000 );
+//-----------------------------
+
+
 
 var annotation = {
   name : "annotation name",
-  enabled: true,
+  enabled: true,  
   datasource: "Banco de dados",
   showLine: true,
 }
@@ -83,34 +85,6 @@ for (var i = 0;i < annotations.length; i++) {
   decreaser += 1000000
 }
 
-/*
-* Este é o modo como o Grafana 'aceita' os dados. Somente escrito diretamente aqui.
-
-var table =
-  {
-    columns: [{text: 'Time', type: 'time'}, {text: 'Country', type: 'string'}, {text: 'Number', type: 'number'}],
-    rows: [
-      [ 1234567, 'SE', 123 ],
-      [ 1234567, 'DE', 231 ],
-      [ 1234567, 'US', 321 ],
-    ]
-  };
-*/
-
-var now = Date.now();
-var decreaser = 0;
-var arrayTable = []
-_.each(timeserie, function(ts){
-  arrayTable.push([ts.id, ts.aerogerador, ts.vel_vento, (now - decreaser)]);
-  decreaser += 1000000;
-});
-
-var table =
-{
-  columns: [{text: 'ID', type: 'number'}, {text: 'AERO', type: 'string'}, {text: 'Velocidade do Vento', type: 'number'}, {text: 'hora', type:'time'}],
-  rows: arrayTable
-};
-  
 function setCORSHeaders(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST");
@@ -124,14 +98,18 @@ app.all('/', function(req, res){
 
 app.all('/search', function(req, res){
   setCORSHeaders(res);
-  var result = [];
-  result.push("Todos");
-  for(var i = 0; i < 12; i++){
-    result.push(timeserie[i].aerogerador)
-  }
-
-  res.json(result);
-  res.end();
+  var resultTar = ["AERO1", "AERO2", "AERO3", "AERO4", "Todos"];
+  /*client.query('SELECT aerogerador FROM teste', function (err, result) {
+    console.log(result.rows);
+    if (err) {
+        console.log(err);
+    }
+    
+    _.each(result.rows, function(rr){
+      resultTar.push(rr.aerogerador);
+    });*/
+    res.json(resultTar);
+    res.end();
 });
 
 app.all('/annotations', function(req, res) {
@@ -143,36 +121,56 @@ app.all('/annotations', function(req, res) {
   res.end();
 });
 
+function receberResQuery(result, res){
+  var tsResult = [];
+
+  var now = Date.now();
+  var decreaser = 0;
+  var arrayTable = []
+  _.each(result.rows, function(ts){
+    arrayTable.push([ts.id, ts.aerogerador, ts.vel_vento, ts.potencia_real, ts.potencia_calculada, ts.alarme, (now - decreaser)]);
+    decreaser += 1000000;
+  });
+  var table =
+      {
+        columns: [{text: 'ID', type: 'number'}, {text: 'Aerogerador', type: 'string'}, {text: 'Velocidade do Vento', type: 'number'}, {text: 'Potência Real', type: 'number'}, {text: 'Potência Calculada', type: 'number'}, {text: 'Alarme', type: 'number'}, {text: 'Hora', type:'time'}],
+        rows: arrayTable
+      };
+      //tsResult.push(table);
+      res.json([table]);
+      res.end();
+}
+
 app.all('/query', function(req, res){
   setCORSHeaders(res);
   console.log(req.url);
   console.log(req.body);
-
-  var tsResult = [];
-  let fakeData = timeserie;
 
   if (req.body.adhocFilters && req.body.adhocFilters.length > 0) {
     fakeData = countryTimeseries;
   }
 
   _.each(req.body.targets, function(target) {
+    console.log(target.target);
     if (target.type === 'table') {
-      tsResult.push(table);
+      if (target.target === null || target.target === 'Todos'){
+        client.query('SELECT * FROM teste', function (err, result) {
+          console.log(result.rows)
+          if (err) {
+              console.log(err);
+          }
+          receberResQuery(result, res);
+        });
+      }else{
+        client.query('SELECT * FROM teste WHERE aerogerador = $1', [target.target], function (err, result) {
+          if (err) {
+            console.log(err);
+          }
+          receberResQuery(result, res);
+        });
+      }
     } 
   });
-
-  //quando se tenta enviar direto a 'table' sem colocar no 'tsResult' (um array), o Grafana dá erro de tipo de resposta inesperada
-  console.log("-----------------")
-  console.log("Valores da tabela")
-  console.log("-----------------")
-  console.log(table);
-  console.log("-----------------")
-  console.log("Valores enviados")
-  console.log("-----------------")
-  console.log(tsResult)
-  console.log("-----------------")
-  res.json(tsResult);
-  res.end();
 });
 
 app.all('/tag[\-]keys', function(req, res) {
