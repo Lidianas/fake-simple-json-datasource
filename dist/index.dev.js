@@ -1,5 +1,6 @@
 "use strict";
 
+//---------------------------- Imports -----------------------------------------
 var express = require('express');
 
 var bodyParser = require('body-parser');
@@ -11,45 +12,95 @@ var app = express();
 var _require = require('pg'),
     Client = _require.Client;
 
-app.use(bodyParser.json()); //-----------------------------
-// Conexão com o banco de dados PostgreSQL
+var fetch = require('node-fetch');
 
-var connectionString = 'postgres://postgres:senhateste@localhost:5432/cepel';
-var client = new Client({
-  connectionString: connectionString
-});
-client.connect(); //-----------------------------
-// Gerador de dados
+app.use(bodyParser.json()); //-------------------------------------------------------------------------------
 
-function geradorDados() {
-  var vel_vento = 0;
-  var potencia_real = 0;
-  var potencia_calculada = 0;
-  var alarme = 0;
-
-  for (var i = 1; i < 32; i++) {
-    vel_vento = Math.random() * (15 - 0);
-    potencia_real = Math.random() * (1300 - 500) + 500;
-    potencia_calculada = Math.random() * (potencia_real - 500) + 500;
-
-    if (potencia_calculada < potencia_real * 0.7) {
-      alarme = 1;
-    } else {
-      alarme = 0;
-    }
-
-    client.query('INSERT INTO teste (aerogerador, vel_vento, potencia_real, potencia_calculada, alarme) values ($1, $2, $3, $4, $5)', ["AERO" + i, vel_vento, potencia_real, potencia_calculada, alarme], function (err, result) {
-      if (err) {
-        console.log(err);
-      }
-    });
-  }
-}
-
-;
-geradorDados();
-setInterval(geradorDados, 10 * 1000); //-----------------------------
-
+var columns = [[[0], [{
+  text: 'date',
+  type: 'time'
+}, {
+  text: 'temp',
+  type: 'number'
+}, {
+  text: 'feels_like',
+  type: 'number'
+}, {
+  text: 'temp_min',
+  type: 'number'
+}, {
+  text: 'temp_max',
+  type: 'number'
+}, {
+  text: 'pressure',
+  type: 'number'
+}, {
+  text: 'sea_level',
+  type: 'number'
+}, {
+  text: 'grnd_level',
+  type: 'number'
+}, {
+  text: 'humidity',
+  type: 'number'
+}, {
+  text: 'temp_kf',
+  type: 'number'
+}, {
+  text: 'visibility',
+  type: 'number'
+}, {
+  text: 'pop',
+  type: 'number'
+}]], [[1], [{
+  text: 'date',
+  type: 'time'
+}, {
+  text: 'id',
+  type: 'number'
+}, {
+  text: 'main',
+  type: 'string'
+}, {
+  text: 'description',
+  type: 'string'
+}, {
+  text: 'icon',
+  type: 'string'
+}, {
+  text: 'visibility',
+  type: 'number'
+}, {
+  text: 'pop',
+  type: 'number'
+}]], [[2], [{
+  text: 'date',
+  type: 'time'
+}, {
+  text: 'clouds',
+  type: 'number'
+}, {
+  text: 'visibility',
+  type: 'number'
+}, {
+  text: 'pop',
+  type: 'number'
+}]], [[3], [{
+  text: 'date',
+  type: 'time'
+}, {
+  text: 'speed',
+  type: 'number'
+}, {
+  text: 'deg',
+  type: 'number'
+}, {
+  text: 'visibility',
+  type: 'number'
+}, {
+  text: 'pop',
+  type: 'number'
+}]]];
 var annotation = {
   name: "annotation name",
   enabled: true,
@@ -96,12 +147,7 @@ app.all('/', function (req, res) {
 });
 app.all('/search', function (req, res) {
   setCORSHeaders(res);
-  var resultTar = ["Todos"];
-
-  for (var i = 1; i < 32; i++) {
-    resultTar.push("AERO" + i);
-  }
-
+  var resultTar = ['main', 'weather', 'clouds', 'wind'];
   res.json(resultTar);
   res.end();
 });
@@ -113,72 +159,64 @@ app.all('/annotations', function (req, res) {
   res.end();
 });
 
-function receberResQuery(result, res) {
-  var arrayTable = [];
-
-  _.each(result.rows, function (ts) {
-    arrayTable.push([ts.id, ts.aerogerador, Number(ts.vel_vento), Number(ts.potencia_real), Number(ts.potencia_calculada), ts.alarme, ts.timestamp]);
-    decreaser += 1000000;
-  });
-
+function setTable(numCol, arrRows) {
   var table = {
-    columns: [{
-      text: 'ID',
-      type: 'number'
-    }, {
-      text: 'Aerogerador',
-      type: 'string'
-    }, {
-      text: 'Velocidade do Vento',
-      type: 'number'
-    }, {
-      text: 'Potência Real',
-      type: 'number'
-    }, {
-      text: 'Potência Calculada',
-      type: 'number'
-    }, {
-      text: 'Alarme',
-      type: 'number'
-    }, {
-      text: 'Timestamp',
-      type: 'time'
-    }],
-    rows: arrayTable
+    columns: columns[numCol][1],
+    rows: arrRows
   };
-  res.json([table]);
-  res.end();
+  return table;
 }
 
 app.all('/query', function (req, res) {
   setCORSHeaders(res);
   console.log(req.url);
   console.log(req.body);
+  fetch('http://api.openweathermap.org/data/2.5/forecast?q=Juan%20L.%20Lacaze,%20UY&appid=252ae24cb200bae4f6c7bccbe8530973&units=metric').then(function (response) {
+    return response.json();
+  }).then(function (mjson) {
+    var mapNumCol = {
+      "main": 0,
+      "weather": 1,
+      "clouds": 2,
+      "wind": 3
+    };
+    var arrResF = [];
+    var isWeather = false;
 
-  if (req.body.adhocFilters && req.body.adhocFilters.length > 0) {
-    fakeData = countryTimeseries;
-  }
-
-  _.each(req.body.targets, function (target) {
-    if (target.type === 'table') {
-      if (target.target === null || target.target === 'Todos') {
-        client.query('SELECT * FROM teste', function (err, result) {
-          if (err) {
-            console.log(err);
-          }
-
-          receberResQuery(result, res);
-        });
-      } else {
-        client.query('SELECT * FROM teste WHERE aerogerador = $1', [target.target], function (err, result) {
-          if (err) {
-            console.log(err);
-          }
-
-          receberResQuery(result, res);
-        });
-      }
+    if (req.body.targets[0].target === 'weather') {
+      isWeather = true;
     }
+
+    _.each(mjson.list, function (ml) {
+      var arrRes = [];
+      arrRes.push(ml.dt_txt);
+
+      switch (isWeather) {
+        case true:
+          _.each(ml[req.body.targets[0].target][0], function (tg) {
+            arrRes.push(tg);
+          });
+
+          break;
+
+        case false:
+          _.each(ml[req.body.targets[0].target], function (tg) {
+            arrRes.push(tg);
+          });
+
+          break;
+      }
+
+      arrRes.push(ml.visibility);
+      arrRes.push(ml.pop);
+      arrResF.push(arrRes);
+    });
+
+    var resultEnd = setTable(mapNumCol[req.body.targets[0].target], arrResF);
+    res.json([resultEnd]);
+    res.end;
+  })["catch"](function (err) {
+    return console.log("Erro ao construir o vetor de dados de previsao de vento: ", err);
   });
 });
 app.all('/tag[\-]keys', function (req, res) {
